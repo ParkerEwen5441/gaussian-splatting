@@ -29,6 +29,7 @@ except ImportError:
     TENSORBOARD_FOUND = False
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+    torch.cuda.set_device(0)
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
@@ -84,11 +85,18 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
-        image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+        image, semantics, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["semantic_image"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
-        Ll1 = l1_loss(image, gt_image)
+        if opt.include_semantics:
+            gt_semantics = viewpoint_cam.get_semantics(semantics_dir=dataset.lf_path)
+            Ll1 = l1_loss(semantics, gt_semantics) + l1_loss(image, gt_image)
+            print("HERE")
+        else:
+            Ll1 = l1_loss(image, gt_image)
+            print("THERE")
+        
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
         loss.backward()
 
