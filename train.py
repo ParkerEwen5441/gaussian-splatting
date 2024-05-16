@@ -33,7 +33,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
-    scene = Scene(dataset, gaussians)
+    scene = Scene(dataset, opt, gaussians)
     gaussians.training_setup(opt)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
@@ -95,7 +95,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             print("HERE")
         else:
             Ll1 = l1_loss(image, gt_image)
-            print("THERE")
+            # print("THERE")
         
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
         loss.backward()
