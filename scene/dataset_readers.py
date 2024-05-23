@@ -11,6 +11,8 @@
 
 import os
 import sys
+import glob
+import open3d as o3d
 from PIL import Image
 from typing import NamedTuple
 from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
@@ -190,6 +192,7 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
 
             # NeRF 'transform_matrix' is a camera-to-world transform
             c2w = np.array(frame["transform_matrix"])
+
             # change from OpenGL/Blender camera axes (Y up, Z back) to COLMAP (Y down, Z forward)
             c2w[:3, 1:3] *= -1
 
@@ -197,6 +200,7 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
             w2c = np.linalg.inv(c2w)
             R = np.transpose(w2c[:3,:3])  # R is stored transposed due to 'glm' in CUDA code
             T = w2c[:3, 3]
+            T = -R.T @ T 
 
             image_path = os.path.join(path, cam_name)
             image_name = Path(cam_name).stem
@@ -219,15 +223,15 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
             
     return cam_infos
 
-def readNerfSyntheticInfo(path, white_background, eval, extension=".png", include_semantics=False):
+def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
     print("Reading Training Transforms")
     train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension)
     print("Reading Test Transforms")
     test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", white_background, extension)
     
-    if not eval:
-        train_cam_infos.extend(test_cam_infos)
-        test_cam_infos = []
+    # if not eval:
+        # train_cam_infos.extend(test_cam_infos)
+        # test_cam_infos = []
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
@@ -235,7 +239,7 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=".png", includ
     if not os.path.exists(ply_path):
         if os.path.exists(os.path.join(path, "camera_data.json")):
             print("Computing Point Cloud from Depth Data")
-            get_point_cloud(path, include_semantics=include_semantics)
+            get_point_cloud(path)
         else:
             # Since this data set has no colmap data, we start with random points
             num_pts = 100_000
@@ -260,7 +264,137 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=".png", includ
                            ply_path=ply_path)
     return scene_info
 
+def readReplicaInfo(path, single_frame_id=None):
+    traj_file = os.path.join(path, 'traj.txt')
+    with open(traj_file, 'r') as poses_file:
+        poses = poses_file.readlines()
+
+    depth_file = os.path.join(path, 'max_depths.txt')
+    with open(depth_file, 'r') as max_depths_file:
+        max_depths = max_depths_file.read().split("\n")
+
+    max_depths = np.array(max_depths).astype('float64')
+    
+    image_paths = sorted(glob.glob(os.path.join(path, 'images/*')))
+    depth_paths = sorted(glob.glob(os.path.join(path, 'depths/*')))
+    
+    cam_infos = []
+    mat_list=[]
+    viz_list=[]
+    pc_init = np.zeros((0,3))
+    color_init = np.zeros((0,3))
+
+    for idx, (image_path, depth_path) in enumerate(zip(image_paths, depth_paths)):
+        if (single_frame_id is not None) and (idx is not single_frame_id):
+            continue
+
+        mat = np.array(poses[idx].split('\n')[0].split(', ')).reshape((4,4)).astype('float64')
+        mat_list.append(mat)
+
+        # Agent to world transform
+        a2h = np.eye(4)
+        a2h[:3, 3] = np.array([0, 1.5, 0])
+
+        # Habitat coords to camera coords
+        h2c = np.eye(4)
+        h2c[1,1] = -1
+        h2c[2,2] = -1 
+
+        # Camera to world
+        c2w = mat @ a2h @ h2c
+
+        R = c2w[:3,:3]
+        T = c2w[:3, 3]
+
+        # Invert
+        T = -R.T @ T # convert from real world to GS format: R=R, T=T.inv()
+
+        height = 512
+        width = 512
+        focal_length_x = 355.5555
+        focal_length_y = 355.5555
+        FovY = focal2fov(focal_length_y, height)
+        FovX = focal2fov(focal_length_x, width)
+
+        image_name = os.path.basename(image_path).split(".")[0]
+        image = Image.open(image_path)
+        depth = Image.open(depth_path)
+
+        cam_info = CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+                              image_path=image_path, image_name=image_name, width=width, height=height)
+        cam_infos.append(cam_info)
+    
+    train_cam_infos = cam_infos
+    test_cam_infos = []
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    ply_path = os.path.join(path, "points3d.ply")
+    if not os.path.exists(ply_path):
+        for idx, (image_path, depth_path) in enumerate(zip(image_paths, depth_paths)):
+            mat = np.array(poses[idx].split('\n')[0].split(', ')).reshape((4,4)).astype('float64')
+
+            # Agent to world transform
+            a2h = np.eye(4)
+            a2h[:3, 3] = np.array([0, 1.5, 0])
+
+            # # Habitat coords to camera coords
+            h2c = np.eye(4)
+            h2c[1,1] = -1
+            h2c[2,2] = -1 
+
+            # Camera to world
+            c2w = mat @ a2h @ h2c
+
+            image = Image.open(image_path)
+            depth = Image.open(depth_path)
+            o3d_depth = o3d.geometry.Image(np.array(depth).astype(np.float32) / 255 * max_depths[idx])
+            o3d_image = o3d.geometry.Image(np.array(image).astype(np.uint8))
+
+            depth_scale = max_depths[idx]
+
+            # Replica dataset cam: H: 512 W: 512 fx: 355.5 fy: 355.5 cx: 256 cy: 256
+            o3d_intrinsic = o3d.camera.PinholeCameraIntrinsic(512, 512, 355.55, 355.55, 256, 256)
+
+            rgbd_img = o3d.geometry.RGBDImage.create_from_color_and_depth(o3d_image, o3d_depth, depth_scale=1, depth_trunc=1000, convert_rgb_to_intensity=False)
+            o3d_pc = o3d.geometry.PointCloud.create_from_rgbd_image(image=rgbd_img, intrinsic=o3d_intrinsic, extrinsic=np.identity(4))
+            dist = np.linalg.norm(np.asarray(o3d_pc.points), axis=1)
+    
+            o3d_pc = o3d_pc.transform(c2w)
+            pc_init = np.concatenate((pc_init, np.asarray(o3d_pc.points)[::20]), axis=0)
+            color_init = np.concatenate((color_init, np.asarray(o3d_pc.colors)[::20]), axis=0)
+            
+        # downsample
+        o3d_pcd = o3d.geometry.PointCloud()
+        o3d_pcd.points = o3d.utility.Vector3dVector(pc_init)
+        o3d_pcd.colors = o3d.utility.Vector3dVector(color_init)
+        o3d_pcd = o3d_pcd.voxel_down_sample(0.05)
+        pc_init = np.asarray(o3d_pcd.points)
+        color_init = np.asarray(o3d_pcd.colors)
+
+        # o3d.visualization.draw_geometries([o3d_pcd])
+
+        num_pts = pc_init.shape[0]
+        xyz = pc_init
+
+        pcd = BasicPointCloud(points=xyz, colors=color_init, normals=np.zeros((num_pts, 3)))
+        storePly(ply_path, pc_init, color_init*255)
+    try:
+        pcd = fetchPly(ply_path)
+        print('read: ', pcd.points.shape)
+    except:
+        pcd = None
+
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
+    return scene_info
+
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
-    "Blender" : readNerfSyntheticInfo
+    "Blender" : readNerfSyntheticInfo,
+    "Replica" : readReplicaInfo
 }

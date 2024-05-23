@@ -15,7 +15,7 @@ from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianR
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, include_semantics=False):
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None):
     """
     Render the scene. 
     
@@ -33,7 +33,6 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     tanfovx = math.tan(viewpoint_camera.FoVx * 0.5)
     tanfovy = math.tan(viewpoint_camera.FoVy * 0.5)
 
-
     raster_settings = GaussianRasterizationSettings(
         image_height=int(viewpoint_camera.image_height),
         image_width=int(viewpoint_camera.image_width),
@@ -47,7 +46,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
         debug=pipe.debug,
-        include_semantics=include_semantics
+        include_semantics=True
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
@@ -83,11 +82,8 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     else:
         colors_precomp = override_color
 
-    if include_semantics:
-        semantics_precomp = pc.get_semantics
-        semantics_precomp = semantics_precomp/ (semantics_precomp.norm(dim=-1, keepdim=True) + 1e-9)
-    else:
-        semantics_precomp = torch.zeros((1,), dtype=opacity.dtype, device=opacity.device)
+    semantics_precomp = pc.get_semantics
+    semantics_precomp = semantics_precomp/ (semantics_precomp.norm(dim=-1, keepdim=True) + 1e-9)
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
     rendered_image, semantic_image, radii = rasterizer(
@@ -100,6 +96,31 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         scales = scales,
         rotations = rotations,
         cov3D_precomp = cov3D_precomp)
+
+    # if True:
+    #     import io, os
+    #     os.makedirs("bin_data", exist_ok=True)
+    #     data = {
+    #         "background": bg_color.clone().detach().cpu(),
+    #         "means3D": means3D.clone().detach().cpu(),
+    #         "opacity": opacity.clone().detach().cpu(),
+    #         "scales": scales.clone().detach().cpu(),
+    #         "rotations": rotations.clone().detach().cpu(),
+    #         "viewmatrix": viewpoint_camera.world_view_transform.clone().detach().cpu(),
+    #         "projmatrix": viewpoint_camera.full_proj_transform.clone().detach().cpu(),
+    #         "sh": shs.clone().detach().cpu(),
+    #         "campos": viewpoint_camera.camera_center.clone().detach().cpu(),
+    #     }
+
+    #     for key, value in data.items():
+    #         f = io.BytesIO()
+    #         vv = value.clone().detach().cpu()
+    #         torch.save(vv, f, _use_new_zipfile_serialization=True)
+    #         bytes_to_send = f.getvalue()
+    #         with open(f"bin_data/{key}.bin", 'wb') as f:
+    #             f.write(bytes_to_send)
+
+    #     exit() 
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.

@@ -77,9 +77,8 @@ class OptimizationParams(ParamGroup):
         self.position_lr_delay_mult = 0.01
         self.position_lr_max_steps = 30_000
         self.feature_lr = 0.0025
-        self.semantics_lr = 0.0025 # TODO: update
-        self.include_semantics = False
-        self.num_classes = 5
+        self.semantics_lr = 0.0025
+        self.num_classes = 6
         self.opacity_lr = 0.05
         self.scaling_lr = 0.005
         self.rotation_lr = 0.001

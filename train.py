@@ -89,14 +89,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
-        if opt.include_semantics:
-            gt_semantics = viewpoint_cam.get_semantics(semantics_dir=dataset.lf_path)
-            Ll1 = l1_loss(semantics, gt_semantics) + l1_loss(image, gt_image)
-            print("HERE")
-        else:
-            Ll1 = l1_loss(image, gt_image)
-            # print("THERE")
+        gt_semantics = viewpoint_cam.get_semantics(semantics_dir=dataset.source_path).cuda()
+
+        # print(semantics.shape)
+        # input(gt_semantics.shape)
         
+        # Ll1 = l1_loss(semantics, gt_semantics) + l1_loss(image, gt_image)
+        Ll1 = l1_loss(image, gt_image)
+
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
         loss.backward()
 

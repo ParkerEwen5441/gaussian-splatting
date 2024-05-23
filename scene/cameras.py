@@ -8,8 +8,9 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-
+import os
 import torch
+import imageio
 from torch import nn
 import numpy as np
 from utils.graphics_utils import getWorld2View2, getProjectionMatrix
@@ -57,8 +58,14 @@ class Camera(nn.Module):
         self.camera_center = self.world_view_transform.inverse()[3, :3]
 
     def get_semantics(self, semantics_dir):
-        semantics_name = os.path.join(semantics_dir, self.image_name)
-        return torch.from_numpy(np.load(semantics_name + '_semantics.npy')).cuda()
+        semantics_name = os.path.join(semantics_dir, "train", self.image_name.strip("rgb")) + "semantic.png"
+        gt_semantics = torch.from_numpy(imageio.imread(semantics_name).astype(np.float32))
+        return torch.permute(nn.functional.one_hot(gt_semantics.to(torch.int64), num_classes=6), (2, 0, 1))
+        
+        # semantics_name = os.path.join(semantics_dir, "train", self.image_name) + "_depth_0001.png"
+        # rgba = torch.from_numpy(imageio.imread(semantics_name).astype(np.float32))
+        # alpha = torch.where(rgba[:,:,0] > 1, 1, 0)
+        # return torch.permute(nn.functional.one_hot(alpha, num_classes=5), (2, 0, 1))
 
 
 class MiniCam:

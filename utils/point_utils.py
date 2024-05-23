@@ -47,13 +47,13 @@ def get_rays_single_image(H, W, intrinsics, c2w, render_stride=1):
         return rays_o, rays_d
 
 
-def get_point_cloud(path, include_semantics=False):
+def get_point_cloud(path):
     """
     Depth images to point cloud
     """
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    data = read_all(path, include_semantics=include_semantics)
+    data = read_all(path)
     cameras = data["camera"]
 
     rgbs = data["rgb"].to(device)
@@ -75,6 +75,8 @@ def get_point_cloud(path, include_semantics=False):
     pcd.colors = o3d.utility.Vector3dVector(rgbs.reshape(-1, 3))
     pcd.estimate_normals()
     downsampled_pcd = pcd.voxel_down_sample(voxel_size=0.075)
+
+    o3d.visualization.draw_geometries([pcd])
 
     point_path = os.path.join(path, "points3d.ply")
     o3d.io.write_point_cloud(point_path, downsampled_pcd)

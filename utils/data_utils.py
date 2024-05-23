@@ -42,7 +42,7 @@ def read_camera(folder):
         max_depths.append(np.array(item['max_depth']))
     return rgb_files, poses, intrinsics, max_depths
 
-def read_all(folder, include_semantics=False):
+def read_all(folder):
     """
     read source images from a folder
     """
@@ -58,8 +58,7 @@ def read_all(folder, include_semantics=False):
         read_image(src_rgb_file, 
                    src_pose, 
                    max_depth=max_depth,
-                   intrinsics=intrinsics,
-                   include_semantics=include_semantics)
+                   intrinsics=intrinsics)
 
         src_rgbs.append(src_rgb)
         src_depths.append(src_depth)
@@ -79,7 +78,7 @@ def read_all(folder, include_semantics=False):
     }
 
 
-def read_image(rgb_file, pose, max_depth, intrinsics, include_semantics=False):
+def read_image(rgb_file, pose, max_depth, intrinsics):
     rgb = torch.from_numpy(imageio.imread(rgb_file).astype(np.float32) / 255.0)
     depth = torch.from_numpy(imageio.imread(rgb_file[:-7]+'depth.png').astype(np.float32) / 255.0 * max_depth)
     semantic = torch.from_numpy(imageio.imread(rgb_file[:-7]+'semantic.png').astype(np.float32) / 255.0)
